@@ -135,6 +135,33 @@ jobs:
           sed -i 's/ndkVersion = "27.0.12077973"/ndkVersion = "27.3.13750724"/' android/app/build.gradle.kts
           grep -q 'ndkVersion = "27.3.13750724"' android/app/build.gradle.kts
 
+      - name: Correct Android CMake argument scope
+        working-directory: ${{ env.DON_MUSE_APP }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle_file = Path("android/app/build.gradle.kts")
+          source = gradle_file.read_text(encoding="utf-8")
+          misplaced = '            arguments += listOf("-DANDROID_STL=c++_shared")\n'
+          target = '        ndk { abiFilters += listOf("arm64-v8a") }\n'
+          if source.count(misplaced) != 1:
+              raise SystemExit("Expected exactly one misplaced CMake arguments line")
+          if source.count(target) != 1:
+              raise SystemExit("Could not find the Android ABI filter block")
+          source = source.replace(misplaced, "", 1)
+          replacement = target + (
+              "        externalNativeBuild {\n"
+              "            cmake { arguments += listOf(\"-DANDROID_STL=c++_shared\") }\n"
+              "        }\n"
+          )
+          source = source.replace(target, replacement, 1)
+          gradle_file.write_text(source, encoding="utf-8")
+          print("Moved ANDROID_STL into defaultConfig.externalNativeBuild.cmake")
+          PY
+
       - name: Assemble the Android APK
         working-directory: ${{ env.DON_MUSE_APP }}/android
         env:
