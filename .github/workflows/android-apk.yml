@@ -160,6 +160,17 @@ jobs:
           source = source.replace(target, replacement, 1)
           gradle_file.write_text(source, encoding="utf-8")
           print("Moved ANDROID_STL into defaultConfig.externalNativeBuild.cmake")
+
+          activity = Path("android/app/src/main/java/fm/donmuse/app/MainActivity.kt")
+          kotlin = activity.read_text(encoding="utf-8")
+          bridge_import = "import fm.donmuse.app.runtime.DonMuseNativeBridge"
+          if bridge_import not in kotlin:
+              package_line = "package fm.donmuse.app\\n"
+              if not kotlin.startswith(package_line):
+                  raise SystemExit("Unexpected MainActivity.kt package declaration")
+              kotlin = kotlin.replace(package_line, package_line + "\\n" + bridge_import + "\\n", 1)
+              activity.write_text(kotlin, encoding="utf-8")
+          print("Ensured MainActivity imports DonMuseNativeBridge")
           PY
 
       - name: Assemble the Android APK
