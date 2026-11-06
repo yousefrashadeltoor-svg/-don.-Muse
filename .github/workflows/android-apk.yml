@@ -76,7 +76,7 @@ jobs:
           test -s "$GITHUB_WORKSPACE/DON-MUSE-Android-Offline-GitHub-Actions.zip"
           mkdir -p "$RUNNER_TEMP/don-muse-source"
           unzip -q "$GITHUB_WORKSPACE/DON-MUSE-Android-Offline-GitHub-Actions.zip" -d "$RUNNER_TEMP/don-muse-source"
-          APP="$RUNNER_TEMP/don-muse-source/extracted"
+          APP="$RUNNER_TEMP/don-muse-source"
           test -f "$APP/package.json"
           test -f "$APP/next.config.ts"
           test -f "$APP/scripts/package-android.mjs"
