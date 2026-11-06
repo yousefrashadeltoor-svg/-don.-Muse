@@ -170,7 +170,7 @@ jobs:
                   return True
               if path.suffix == ".map":
                   return True
-              if path.name == "ffmpeg" and "ffmpeg-static" in parts:
+              if path.name == "ffmpeg" and any(part.startswith("ffmpeg-static") for part in parts):
                   return True
               if "node_modules" in parts:
                   i = parts.index("node_modules")
@@ -213,7 +213,7 @@ jobs:
                   raise SystemExit(f"Optimized server archive is missing required files: {sorted(missing)}")
               if any(n.startswith("android/") for n in names):
                   raise SystemExit("Android source/runtime duplicate remains in the website archive")
-              if any(PurePosixPath(n).name == "ffmpeg" and "ffmpeg-static" in PurePosixPath(n).parts for n in names):
+              if any(PurePosixPath(n).name == "ffmpeg" and any(part.startswith("ffmpeg-static") for part in PurePosixPath(n).parts) for n in names):
                   raise SystemExit("Host FFmpeg executable remains in the Android website archive")
 
           os.replace(optimized, archive)
