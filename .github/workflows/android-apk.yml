@@ -101,7 +101,10 @@ jobs:
           # Pin the official release checksum-list asset itself, then use it
           # to verify the Android runtime archive before extracting it.
           echo "f661820960b5ab5cc6c2ae43f6c37de09a993a2c2b45430e4174edc38011453c  $CHECKSUMS" | sha256sum --check
-          grep -E '  nodejs-mobile-android-24\\.22\\.1-0\\.zip
+          EXPECTED_SHA="$(awk '$2 == "nodejs-mobile-android-24.22.1-0.zip" { print $1 }' "$CHECKSUMS")"
+          test "${#EXPECTED_SHA}" -eq 64
+          ACTUAL_SHA="$(sha256sum "$RUNTIME_ZIP" | cut -d ' ' -f 1)"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
           unzip -q "$RUNTIME_ZIP" -d "$RUNTIME_DIR"
 
           LIBNODE="$(find "$RUNTIME_DIR" -type f -path '*/arm64-v8a/libnode.so' -print -quit)"
