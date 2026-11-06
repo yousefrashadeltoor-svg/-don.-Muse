@@ -40,12 +40,29 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build packages
+      # Do not use android-actions/setup-android here: its default "tools"
+      # package was removed from the current Android SDK repository.
+      - name: Configure Android SDK without obsolete packages
+        shell: bash
         run: |
-          sdkmanager --install \
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT/cmdline-tools"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "Using Android SDK at $SDK_ROOT"
+          "$SDKMANAGER" --version
+
+          # sdkmanager is interactive; feed affirmative responses only to the
+          # SDK license prompt, then install only stable build dependencies.
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses
+          set -o pipefail
+
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0" \
@@ -62,6 +79,7 @@ jobs:
           APP="$RUNNER_TEMP/don-muse-source/extracted"
           test -f "$APP/package.json"
           test -f "$APP/next.config.ts"
+          test -f "$APP/scripts/package-android.mjs"
           test -f "$APP/android/app/src/main/cpp/CMakeLists.txt"
           test -f "$APP/android/app/src/main/java/fm/donmuse/app/MainActivity.kt"
           echo "DON_MUSE_APP=$APP" >> "$GITHUB_ENV"
@@ -122,7 +140,8 @@ jobs:
       - name: Assemble the Android APK
         working-directory: ${{ env.DON_MUSE_APP }}/android
         env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
       - name: Verify APK contents and calculate checksum
