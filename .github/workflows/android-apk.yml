@@ -124,9 +124,9 @@ jobs:
           from pathlib import Path
           p = Path("next.config.ts")
           source = p.read_text(encoding="utf-8")
-          setting = '  images: { unoptimized: true },\\n'
+          setting = '  images: { unoptimized: true },\n'
           if setting.strip() not in source:
-              marker = '  output: "standalone",\\n'
+              marker = '  output: "standalone",\n'
               if source.count(marker) != 1:
                   raise SystemExit("Could not safely locate Next.js standalone config")
               source = source.replace(marker, marker + setting, 1)
@@ -218,7 +218,7 @@ jobs:
 
           os.replace(optimized, archive)
           digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-          (assets / "donmuse-server.sha256").write_text(digest + "\\n", encoding="utf-8")
+          (assets / "donmuse-server.sha256").write_text(digest + "\n", encoding="utf-8")
           print(f"Removed {removed_count} non-runtime/duplicate files")
           print(f"Optimized website bundle: {archive.stat().st_size / 1024 / 1024:.2f} MiB")
           print(f"Updated embedded server SHA-256: {digest}")
