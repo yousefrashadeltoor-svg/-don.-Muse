@@ -1,0 +1,149 @@
+name: Build DON MUSE Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "DON-MUSE-Android-Offline-GitHub-Actions.zip"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: don-muse-android-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build arm64 Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.1"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.3.13750724" \
+            "cmake;3.22.1"
+
+      - name: Extract the original DON MUSE project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/DON-MUSE-Android-Offline-GitHub-Actions.zip"
+          mkdir -p "$RUNNER_TEMP/don-muse-source"
+          unzip -q "$GITHUB_WORKSPACE/DON-MUSE-Android-Offline-GitHub-Actions.zip" -d "$RUNNER_TEMP/don-muse-source"
+          APP="$RUNNER_TEMP/don-muse-source/extracted"
+          test -f "$APP/package.json"
+          test -f "$APP/next.config.ts"
+          test -f "$APP/android/app/src/main/cpp/CMakeLists.txt"
+          test -f "$APP/android/app/src/main/java/fm/donmuse/app/MainActivity.kt"
+          echo "DON_MUSE_APP=$APP" >> "$GITHUB_ENV"
+          echo "Original Next.js and Android source files verified."
+
+      - name: Download and verify the Android Node.js 24 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME_ZIP="$RUNNER_TEMP/nodejs-mobile-android-24.22.1-0.zip"
+          RUNTIME_DIR="$RUNNER_TEMP/nodejs-mobile-runtime"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/fogtape/nodejs-mobile/releases/download/v24.22.1-0/nodejs-mobile-android-24.22.1-0.zip" \
+            --output "$RUNTIME_ZIP"
+          echo "d6fd9f610fe5d81fede8f0d400c5a62723247725a19831835abf4f0604250  $RUNTIME_ZIP" | sha256sum --check
+          mkdir -p "$RUNTIME_DIR"
+          unzip -q "$RUNTIME_ZIP" -d "$RUNTIME_DIR"
+
+          LIBNODE="$(find "$RUNTIME_DIR" -type f -path '*/arm64-v8a/libnode.so' -print -quit)"
+          NODE_HEADER="$(find "$RUNTIME_DIR" -type f -name node.h -print -quit)"
+          test -n "$LIBNODE"
+          test -n "$NODE_HEADER"
+
+          JNI_DIR="$DON_MUSE_APP/android/app/src/main/jniLibs/arm64-v8a"
+          INCLUDE_DIR="$DON_MUSE_APP/android/app/src/main/cpp/node-include"
+          mkdir -p "$JNI_DIR" "$INCLUDE_DIR"
+          install -m 0644 "$LIBNODE" "$JNI_DIR/libnode.so"
+          cp -a "$(dirname "$NODE_HEADER")/." "$INCLUDE_DIR/"
+          test -s "$INCLUDE_DIR/node.h"
+          test -s "$JNI_DIR/libnode.so"
+          echo "Embedded Node runtime and matching headers installed for arm64-v8a."
+          du -h "$JNI_DIR/libnode.so"
+
+      - name: Install website dependencies
+        working-directory: ${{ env.DON_MUSE_APP }}
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm install --no-audit --no-fund --package-lock=false
+
+      - name: Build the original Next.js website
+        working-directory: ${{ env.DON_MUSE_APP }}
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NODE_OPTIONS: "--max-old-space-size=6144"
+          DATABASE_URL: "local"
+        run: npm run build
+
+      - name: Package the original website for Android
+        working-directory: ${{ env.DON_MUSE_APP }}
+        run: node scripts/package-android.mjs
+
+      - name: Align project with the pinned Android NDK
+        working-directory: ${{ env.DON_MUSE_APP }}
+        run: |
+          sed -i 's/ndkVersion = "27.0.12077973"/ndkVersion = "27.3.13750724"/' android/app/build.gradle.kts
+          grep -q 'ndkVersion = "27.3.13750724"' android/app/build.gradle.kts
+
+      - name: Assemble the Android APK
+        working-directory: ${{ env.DON_MUSE_APP }}/android
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify APK contents and calculate checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$DON_MUSE_APP/android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libnode.so'
+          unzip -l "$APK" | grep -q 'assets/donmuse-server.zip'
+          mkdir -p "$GITHUB_WORKSPACE/release"
+          cp "$APK" "$GITHUB_WORKSPACE/release/DON-MUSE-Android-arm64.apk"
+          (cd "$GITHUB_WORKSPACE/release" && sha256sum DON-MUSE-Android-arm64.apk > SHA256SUMS.txt)
+          ls -lh "$GITHUB_WORKSPACE/release"
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DON-MUSE-Android-APK
+          path: |
+            release/DON-MUSE-Android-arm64.apk
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
