@@ -1,0 +1,45 @@
+name: Inspect DON MUSE source archive
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Inspect uploaded ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="DON-MUSE-Android-Offline-GitHub-Actions.zip"
+          test -f "$ZIP" || { echo "::error::Source ZIP not found"; exit 1; }
+          mkdir -p extracted
+          unzip -q "$ZIP" -d extracted
+          {
+            echo "Archive: $ZIP"
+            echo
+            echo "Top-level entries:"
+            find extracted -mindepth 1 -maxdepth 2 -printf '%y %p\n' | sort | head -300
+            echo
+            echo "Build and app manifests:"
+            find extracted -type f \( -name gradlew -o -name settings.gradle -o -name settings.gradle.kts -o -name build.gradle -o -name build.gradle.kts -o -name package.json -o -name next.config.js -o -name next.config.ts -o -name AndroidManifest.xml \) -print | sort
+            echo
+            echo "Workflow files:"
+            find extracted -path '*/.github/workflows/*' -type f -print | sort
+          } | tee SOURCE-INSPECTION.txt
+
+      - name: Upload extracted source and inspection report
+        uses: actions/upload-artifact@v4
+        with:
+          name: don-muse-source-inspection
+          path: |
+            extracted/
+            SOURCE-INSPECTION.txt
+          if-no-files-found: error
+          retention-days: 7
