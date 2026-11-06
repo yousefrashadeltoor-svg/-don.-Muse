@@ -171,6 +171,17 @@ jobs:
               kotlin = kotlin.replace(package_line, package_line + "\n" + bridge_import + "\n", 1)
               activity.write_text(kotlin, encoding="utf-8")
           print("Ensured MainActivity imports DonMuseNativeBridge")
+
+          cmake_file = Path("android/app/src/main/cpp/CMakeLists.txt")
+          cmake = cmake_file.read_text(encoding="utf-8")
+          old_standard = "target_compile_features(donmuse_node_bridge PRIVATE cxx_std_17)"
+          new_standard = "target_compile_features(donmuse_node_bridge PRIVATE cxx_std_20)"
+          if old_standard not in cmake and new_standard not in cmake:
+              raise SystemExit("Could not find expected CMake C++ standard")
+          if old_standard in cmake:
+              cmake = cmake.replace(old_standard, new_standard, 1)
+              cmake_file.write_text(cmake, encoding="utf-8")
+          print("Configured native Node bridge for C++20")
           PY
 
       - name: Assemble the Android APK
