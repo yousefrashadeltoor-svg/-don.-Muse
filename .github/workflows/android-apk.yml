@@ -117,6 +117,23 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm install --no-audit --no-fund --package-lock=false
 
+      - name: Configure image delivery for Android runtime
+        working-directory: ${{ env.DON_MUSE_APP }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("next.config.ts")
+          source = p.read_text(encoding="utf-8")
+          setting = '  images: { unoptimized: true },\\n'
+          if setting.strip() not in source:
+              marker = '  output: "standalone",\\n'
+              if source.count(marker) != 1:
+                  raise SystemExit("Could not safely locate Next.js standalone config")
+              source = source.replace(marker, marker + setting, 1)
+              p.write_text(source, encoding="utf-8")
+          print("Android build serves original image URLs without Linux-only sharp binaries")
+          PY
+
       - name: Build the original Next.js website
         working-directory: ${{ env.DON_MUSE_APP }}
         env:
@@ -128,6 +145,84 @@ jobs:
       - name: Package the original website for Android
         working-directory: ${{ env.DON_MUSE_APP }}
         run: node scripts/package-android.mjs
+
+      - name: Remove duplicate and host-only files from Android server bundle
+        working-directory: ${{ env.DON_MUSE_APP }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import PurePosixPath
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          import hashlib
+          import os
+
+          assets = Path("android/app/src/main/assets")
+          archive = assets / "donmuse-server.zip"
+          optimized = assets / "donmuse-server.optimized.zip"
+          removed_count = 0
+
+          def exclude(name: str) -> bool:
+              path = PurePosixPath(name)
+              parts = path.parts
+              if name.startswith(("android/", ".github/", "src/", "scripts/")):
+                  return True
+              if path.suffix == ".map":
+                  return True
+              if path.name == "ffmpeg" and "ffmpeg-static" in parts:
+                  return True
+              if "node_modules" in parts:
+                  i = parts.index("node_modules")
+                  sub = parts[i + 1:]
+                  if sub and sub[0] in {"tsx", "@esbuild-kit", "@esbuild", "esbuild"}:
+                      return True
+                  if len(sub) >= 2 and sub[0] == ".bin" and sub[1] == "esbuild":
+                      return True
+                  if sub and sub[0] == "sharp":
+                      return True
+                  if len(sub) >= 2 and sub[0] == "@img" and sub[1].startswith("sharp-"):
+                      return True
+              return False
+
+          with ZipFile(archive, "r") as source, ZipFile(
+              optimized, "w", compression=ZIP_DEFLATED, compresslevel=9, allowZip64=True
+          ) as target:
+              for info in source.infolist():
+                  if exclude(info.filename):
+                      removed_count += 1
+                      continue
+                  data = source.read(info.filename)
+                  copied = info
+                  copied.compress_type = ZIP_DEFLATED
+                  target.writestr(copied, data, compress_type=ZIP_DEFLATED, compresslevel=9)
+
+          with ZipFile(optimized, "r") as check:
+              bad = check.testzip()
+              if bad:
+                  raise SystemExit(f"Optimized server archive failed CRC check: {bad}")
+              names = set(check.namelist())
+              required = {
+                  "server.js",
+                  "package.json",
+                  ".next/BUILD_ID",
+                  "node_modules/next/package.json",
+              }
+              missing = required - names
+              if missing:
+                  raise SystemExit(f"Optimized server archive is missing required files: {sorted(missing)}")
+              if any(n.startswith("android/") for n in names):
+                  raise SystemExit("Android source/runtime duplicate remains in the website archive")
+              if any(PurePosixPath(n).name == "ffmpeg" and "ffmpeg-static" in PurePosixPath(n).parts for n in names):
+                  raise SystemExit("Host FFmpeg executable remains in the Android website archive")
+
+          os.replace(optimized, archive)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (assets / "donmuse-server.sha256").write_text(digest + "\\n", encoding="utf-8")
+          print(f"Removed {removed_count} non-runtime/duplicate files")
+          print(f"Optimized website bundle: {archive.stat().st_size / 1024 / 1024:.2f} MiB")
+          print(f"Updated embedded server SHA-256: {digest}")
+          PY
 
       - name: Align project with the pinned Android NDK
         working-directory: ${{ env.DON_MUSE_APP }}
